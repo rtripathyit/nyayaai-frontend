@@ -878,11 +878,51 @@ function showTyping() {
   const cw = document.getElementById('chatWindow');
   const div = document.createElement('div');
   div.className = 'msg ai'; div.id = 'typingIndicator';
-  div.innerHTML = `<div class="msg-avatar">⚖️</div><div class="msg-content"><div class="typing-indicator"><div class="typing-dot"></div><div class="typing-dot"></div><div class="typing-dot"></div><span style="font-size:11px;color:var(--text-muted);margin-left:5px">Searching legal databases…</span></div></div>`;
-  cw.appendChild(div); cw.scrollTop = cw.scrollHeight;
+  div.innerHTML = `
+    <div class="msg-avatar">⚖️</div>
+    <div class="msg-content">
+      <div class="typing-indicator">
+        <div class="typing-dot"></div>
+        <div class="typing-dot"></div>
+        <div class="typing-dot"></div>
+        <span id="typingStatus" style="font-size:11.5px;color:var(--text-muted);margin-left:6px;transition:opacity 0.4s;"></span>
+      </div>
+    </div>`;
+  cw.appendChild(div);
+  cw.scrollTop = cw.scrollHeight;
+
+  // Rotating status messages with realistic timing hints
+  const stages = [
+    { msg: 'Reading your question…',         delay: 0    },
+    { msg: 'Searching legal databases…',     delay: 1800 },
+    { msg: 'Reviewing Indian law sections…', delay: 4000 },
+    { msg: 'Composing your answer…',         delay: 7000 },
+    { msg: 'Almost ready…',                  delay: 11000 },
+    { msg: 'Finalising response…',           delay: 16000 },
+  ];
+
+  const statusEl = document.getElementById('typingStatus');
+  window._typingTimers = [];
+
+  stages.forEach(({ msg, delay }) => {
+    const t = setTimeout(() => {
+      if (!statusEl) return;
+      statusEl.style.opacity = '0';
+      setTimeout(() => {
+        if (statusEl) { statusEl.textContent = msg; statusEl.style.opacity = '1'; }
+      }, 200);
+    }, delay);
+    window._typingTimers.push(t);
+  });
 }
 
-function removeTyping() { const t = document.getElementById('typingIndicator'); if (t) t.remove(); }
+function removeTyping() {
+  // Clear all rotating timers
+  (window._typingTimers || []).forEach(t => clearTimeout(t));
+  window._typingTimers = [];
+  const t = document.getElementById('typingIndicator');
+  if (t) t.remove();
+}
 
 function formatResponse(text) {
   let html = text
@@ -973,13 +1013,42 @@ async function sendMessage() {
         showApiKeyScreen('❌ Invalid API key. Please enter a valid key.');
         return;
       }
-      if (errType === 'rate_limit_error') {
-        throw new Error('Rate limit reached. Please wait a moment and try again.');
+
+      // Fatal errors only — show connectivity-style message
+      if (errType === 'fatal' || errType === 'server_config_error') {
+        removeTyping();
+        appendMessage('ai', `<div style="font-size:13px;">⚠️ ${errMsg}</div>`);
+        isLoading = false;
+        document.getElementById('sendBtn').disabled = false;
+        return;
       }
-      if (errType === 'overloaded_error') {
-        throw new Error('Anthropic servers are busy right now. Please try again in a few seconds.');
+
+      // For 'retries_exhausted' or 'connectivity' — show minimal friendly message
+      if (errType === 'retries_exhausted' || errType === 'connectivity') {
+        removeTyping();
+        appendMessage('ai', `<div style="font-size:13px;line-height:1.8;">
+          ⏳ The service is momentarily busy. Please try again.<br>
+          <span onclick="retryLast()" style="cursor:pointer;color:var(--gold);text-decoration:underline;">🔄 Retry now</span>
+        </div>`);
+        isLoading = false;
+        document.getElementById('sendBtn').disabled = false;
+        return;
       }
-      throw new Error(`API Error (${errType}): ${errMsg}`);
+
+      // All other API errors — silently auto-retry after 1.5s
+      console.warn('API error, auto-retrying:', errType, errMsg);
+      removeTyping();
+      isLoading = false;
+      document.getElementById('sendBtn').disabled = false;
+      setTimeout(() => {
+        const lastMsg = messages[messages.length - 1];
+        if (lastMsg?.role === 'user') {
+          messages.pop();
+          document.getElementById('userInput').value = lastMsg.content;
+          sendMessage();
+        }
+      }, 1500);
+      return;
     }
 
     // ── Extract reply text ──
@@ -993,8 +1062,20 @@ async function sendMessage() {
     }
 
     if (!replyText) {
-      // Model may have only used tools (web search) without final text — retry signal
-      replyText = 'I searched for information but could not formulate a complete answer. Please rephrase your question and try again.';
+      // Backend already retried — auto-retry from frontend once more silently
+      console.warn('Frontend received empty replyText despite 200 — retrying once');
+      removeTyping();
+      isLoading = false;
+      document.getElementById('sendBtn').disabled = false;
+      setTimeout(() => {
+        const lastMsg = messages[messages.length - 1];
+        if (lastMsg?.role === 'user') {
+          messages.pop();
+          document.getElementById('userInput').value = lastMsg.content;
+          sendMessage();
+        }
+      }, 1500);
+      return;
     }
 
     removeTyping();
@@ -1003,19 +1084,32 @@ async function sendMessage() {
 
   } catch (err) {
     removeTyping();
-    const isNetworkErr = err.message.includes('Failed to fetch') || err.message.includes('NetworkError') || err.message.includes('net::');
-    const friendlyMsg = isNetworkErr
-      ? '🔌 Could not reach the server. Possible causes:<br><br>' +
-        '• No internet connection<br>' +
-        '• If using Render backend: your server may be sleeping (wait 30 sec and retry)<br>' +
-        '• If opening HTML directly from your computer: browsers block direct API calls for security — you must host the file on a web server or enter an API key'
-      : `⚠️ ${err.message}`;
+    // Only show error if it's a real connectivity issue — backend handles all retries internally
+    const isConnErr =
+      err.message.includes('Failed to fetch') ||
+      err.message.includes('NetworkError')    ||
+      err.message.includes('net::ERR')        ||
+      err.message.includes('Load failed');
 
-    appendMessage('ai', `<div style="font-size:13px;line-height:1.8;">${friendlyMsg}<br><br>
-      <span onclick="retryLast()" style="cursor:pointer;color:var(--gold);text-decoration:underline;">🔄 Click to retry</span>
-      &nbsp;&nbsp;
-      <span onclick="showApiKeyScreen()" style="cursor:pointer;color:var(--saffron-light);text-decoration:underline;">🔑 Enter API key</span>
-    </div>`);
+    if (isConnErr) {
+      appendMessage('ai', `<div style="font-size:13px;line-height:1.8;">
+        🔌 <strong>No internet connection.</strong> Please check your network and try again.<br><br>
+        <span onclick="retryLast()" style="cursor:pointer;color:var(--gold);text-decoration:underline;">🔄 Retry</span>
+      </div>`);
+    } else {
+      // For any other error (server busy, timeout etc.) — silently retry once from frontend
+      console.warn('Non-network error, auto-retrying once:', err.message);
+      setTimeout(() => {
+        if (!isLoading) {
+          const lastMsg = messages[messages.length - 1];
+          if (lastMsg?.role === 'user') {
+            messages.pop();
+            document.getElementById('userInput').value = lastMsg.content;
+            sendMessage();
+          }
+        }
+      }, 2000);
+    }
   }
 
   isLoading = false;
