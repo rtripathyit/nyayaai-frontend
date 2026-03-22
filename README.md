@@ -1,1 +1,1 @@
-# nyayaai-frontend
+# NyayaAI
