@@ -50,35 +50,6 @@
   }
 
   /* ── SUPPORT BANNER ── */
-  .support-banner {
-    position: relative; z-index: 10;
-    background: linear-gradient(90deg, rgba(201,168,76,0.08), rgba(255,107,0,0.06), rgba(201,168,76,0.08));
-    border-bottom: 1px solid rgba(201,168,76,0.18);
-    padding: 14px 36px;
-    display: flex; align-items: center; gap: 18px;
-  }
-
-  .qr-frame {
-    width: 82px; height: 82px; border-radius: 10px;
-    border: 2px dashed rgba(201,168,76,0.4);
-    background: rgba(201,168,76,0.04);
-    display: flex; flex-direction: column;
-    align-items: center; justify-content: center;
-    flex-shrink: 0; cursor: pointer;
-    transition: all 0.2s; position: relative; overflow: hidden;
-  }
-  .qr-frame:hover { border-color: var(--gold); background: rgba(201,168,76,0.09); }
-  .qr-frame input[type="file"] { position: absolute; inset: 0; opacity: 0; cursor: pointer; }
-  .qr-frame img { width: 100%; height: 100%; object-fit: cover; border-radius: 8px; display: none; }
-  .qr-placeholder { display: flex; flex-direction: column; align-items: center; gap: 3px; }
-  .qr-placeholder span:first-child { font-size: 26px; opacity: 0.7; }
-  .qr-placeholder span:last-child { font-size: 9px; color: var(--gold); letter-spacing: 0.06em; text-transform: uppercase; text-align: center; }
-
-  .support-text { flex: 1; }
-  .support-text h4 { font-family: 'Cormorant Garamond', serif; font-size: 16px; font-weight: 600; color: var(--gold-light); margin-bottom: 3px; }
-  .support-text p { font-size: 12px; color: var(--text-muted); line-height: 1.6; }
-  .support-text p em { color: var(--gold); font-style: normal; }
-
   /* ── HEADER ── */
   header {
     position: relative; z-index: 10;
@@ -114,6 +85,8 @@
     color: var(--text-muted); background: var(--cream-dim);
   }
   .badge-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--green); box-shadow: 0 0 7px var(--green); animation: pulse 2s infinite; }
+  .badge-dot.warn { background: #FBBF24; box-shadow: 0 0 7px #FBBF24; }
+  .badge-dot.err  { background: #F87171; box-shadow: 0 0 7px #F87171; animation: none; }
   @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.4} }
 
   /* ── LAYOUT ── */
@@ -451,29 +424,12 @@
   @media (max-width: 900px) {
     .sidebar { display: none; }
     .layout { padding: 0 12px; }
-    header, .support-banner { padding-left: 16px; padding-right: 16px; }
+    header { padding-left: 16px; padding-right: 16px; }
     .chat-window { max-height: calc(100vh - 290px); }
   }
 </style>
 </head>
 <body>
-
-<!-- SUPPORT BANNER -->
-<div class="support-banner">
-  <div class="qr-frame" title="Click to upload your QR code">
-    <img id="qrImg" alt="QR Code">
-    <div class="qr-placeholder" id="qrPlaceholder">
-      <span>📲</span>
-      <span>Upload<br>QR Code</span>
-    </div>
-    <input type="file" accept="image/*" onchange="uploadQR(event)">
-  </div>
-  <div class="support-text">
-    <h4>❤️ Did NyayaAI help you? Show your support!</h4>
-    <p>If <em>NyayaAI</em> helped you understand your legal rights, consider supporting this free service.<br>Scan the QR code to contribute — every rupee keeps this platform running for everyone. 🙏</p>
-  </div>
-  <span style="font-size:22px;">🇮🇳</span>
-</div>
 
 <!-- HEADER -->
 <header>
@@ -483,9 +439,9 @@
     <sub>न्याय AI · Indian Legal Intelligence</sub>
   </div>
   <div class="header-right">
-    <div class="header-badge">
-      <div class="badge-dot"></div>
-      Live · All Indian Languages
+    <div class="header-badge" id="connBadge" onclick="testConnection()" title="Click to test backend connection" style="cursor:pointer;">
+      <div class="badge-dot" id="connDot"></div>
+      <span id="connText">Checking…</span>
     </div>
   </div>
 </header>
@@ -702,6 +658,76 @@ let isListening = false;
 let feedbackRating = 0;
 let msgCounter = 0;
 
+// ═══════════════════════════════════════════════════
+//  ▶ EDIT THIS LINE with your Render backend URL
+//  Example: 'https://nyayaai-backend.onrender.com/api/chat'
+//  Leave as '' to use per-user API key mode instead
+// ═══════════════════════════════════════════════════
+const PROXY_URL = 'https://nyayaai-backend-1.onrender.com/api/chat';
+
+// Derive ping URL from PROXY_URL automatically
+const PING_URL = PROXY_URL ? PROXY_URL.replace('/api/chat', '/api/ping') : '';
+
+/* CONNECTION TEST */
+async function testConnection() {
+  const dot  = document.getElementById('connDot');
+  const text = document.getElementById('connText');
+  dot.className  = 'badge-dot warn';
+  text.textContent = 'Testing…';
+
+  if (!PROXY_URL) {
+    dot.className  = 'badge-dot warn';
+    text.textContent = 'No backend URL set';
+    showToast('⚠️ PROXY_URL is empty. Edit nyayaai.html and add your Render URL, then re-upload to GitHub.');
+    return;
+  }
+
+  try {
+    const t0  = Date.now();
+    const res = await fetch(PING_URL, { signal: AbortSignal.timeout(8000) });
+    const ms  = Date.now() - t0;
+    if (res.ok) {
+      dot.className  = 'badge-dot';
+      text.textContent = `Connected · ${ms}ms`;
+      showToast(`✅ Backend is reachable! Response time: ${ms}ms`);
+    } else {
+      throw new Error(`HTTP ${res.status}`);
+    }
+  } catch (err) {
+    dot.className  = 'badge-dot err';
+    text.textContent = 'Backend unreachable';
+    const msg = err.name === 'TimeoutError'
+      ? '⏳ Backend is sleeping (Render free tier). Wait 30 seconds and try again, or set up UptimeRobot to keep it awake.'
+      : `❌ Cannot reach backend: ${err.message}. Check your Render dashboard — is the service Live (green)?`;
+    showToast(msg, 6000);
+  }
+}
+
+// Auto-check connection on page load
+window.addEventListener('load', async () => {
+  const dot  = document.getElementById('connDot');
+  const text = document.getElementById('connText');
+
+  if (!PROXY_URL) {
+    dot.className  = 'badge-dot warn';
+    text.textContent = 'No backend set';
+    return;
+  }
+
+  try {
+    const res = await fetch(PING_URL, { signal: AbortSignal.timeout(6000) });
+    if (res.ok) {
+      dot.className  = 'badge-dot';
+      text.textContent = 'Backend live ✓';
+    } else {
+      throw new Error('not ok');
+    }
+  } catch {
+    dot.className  = 'badge-dot err';
+    text.textContent = 'Backend offline';
+  }
+});
+
 /* API KEY */
 function showApiKeyScreen(err) {
   document.getElementById('apikeyOverlay').classList.add('open');
@@ -720,18 +746,6 @@ function saveApiKey() {
   showToast('✅ API key saved for this session. Start asking!');
 }
 document.getElementById('apikeyInput').addEventListener('keydown', e => { if (e.key === 'Enter') saveApiKey(); });
-
-/* QR */
-function uploadQR(e) {
-  const file = e.target.files[0]; if (!file) return;
-  const reader = new FileReader();
-  reader.onload = ev => {
-    document.getElementById('qrImg').src = ev.target.result;
-    document.getElementById('qrImg').style.display = 'block';
-    document.getElementById('qrPlaceholder').style.display = 'none';
-  };
-  reader.readAsDataURL(file);
-}
 
 /* MIC */
 function toggleMic() {
@@ -898,25 +912,29 @@ async function sendMessage() {
   isLoading = true;
   document.getElementById('sendBtn').disabled = true;
   showTyping();
-  try {
-    // ── STEP: After deploying your backend on Render, paste your
-    // Render URL below. Example:
-    //   const PROXY_URL = 'https://nyayaai-backend.onrender.com/api/chat';
-    // Leave as '' to use the per-user API key screen instead.
-    const PROXY_URL = 'https://nyayaai-backend-1.onrender.com/api/chat';
 
+  try {
     let res;
+
     if (PROXY_URL) {
-      // Production: call your own backend proxy (API key stays secret on server)
+      // ── MODE A: Backend proxy (production) ──
       res = await fetch(PROXY_URL, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ messages, system: SYSTEM_PROMPT })
       });
+
     } else {
-      // Dev/personal mode: use API key entered by user in setup screen
+      // ── MODE B: Direct with user's own API key ──
       const userKey = sessionStorage.getItem('nyayaai_key');
-      if (!userKey) { removeTyping(); showApiKeyScreen(); isLoading = false; document.getElementById('sendBtn').disabled = false; return; }
+      if (!userKey) {
+        removeTyping();
+        isLoading = false;
+        document.getElementById('sendBtn').disabled = false;
+        showApiKeyScreen();
+        return;
+      }
+
       res = await fetch('https://api.anthropic.com/v1/messages', {
         method: 'POST',
         headers: {
@@ -929,28 +947,91 @@ async function sendMessage() {
           model: 'claude-sonnet-4-20250514',
           max_tokens: 1000,
           system: SYSTEM_PROMPT,
-          tools: [{ type: 'web_search_20250305', name: 'web_search' }],
           messages
         })
       });
     }
 
-    const data = await res.json();
-    let replyText = '';
-    if (data.content) replyText = data.content.filter(b => b.type === 'text').map(b => b.text).join('\n\n');
-    if (!replyText && data.error) {
-      if (data.error.type === 'authentication_error') { sessionStorage.removeItem('nyayaai_key'); showApiKeyScreen('Invalid API key. Please try again.'); }
-      replyText = `Error: ${data.error.message || 'Please try again.'}`;
+    // ── Parse response ──
+    let data;
+    try {
+      data = await res.json();
+    } catch(parseErr) {
+      throw new Error(`Server returned non-JSON response (HTTP ${res.status}). Check your Render backend is running.`);
     }
+
+    // ── Handle API-level errors ──
+    if (data.error) {
+      const errType = data.error.type || '';
+      const errMsg  = data.error.message || 'Unknown error';
+
+      if (errType === 'authentication_error') {
+        sessionStorage.removeItem('nyayaai_key');
+        removeTyping();
+        isLoading = false;
+        document.getElementById('sendBtn').disabled = false;
+        showApiKeyScreen('❌ Invalid API key. Please enter a valid key.');
+        return;
+      }
+      if (errType === 'rate_limit_error') {
+        throw new Error('Rate limit reached. Please wait a moment and try again.');
+      }
+      if (errType === 'overloaded_error') {
+        throw new Error('Anthropic servers are busy right now. Please try again in a few seconds.');
+      }
+      throw new Error(`API Error (${errType}): ${errMsg}`);
+    }
+
+    // ── Extract reply text ──
+    let replyText = '';
+    if (data.content && Array.isArray(data.content)) {
+      replyText = data.content
+        .filter(b => b.type === 'text')
+        .map(b => b.text)
+        .join('\n\n')
+        .trim();
+    }
+
+    if (!replyText) {
+      // Model may have only used tools (web search) without final text — retry signal
+      replyText = 'I searched for information but could not formulate a complete answer. Please rephrase your question and try again.';
+    }
+
     removeTyping();
     messages.push({ role: 'assistant', content: replyText });
     appendMessage('ai', formatResponse(replyText));
+
   } catch (err) {
     removeTyping();
-    appendMessage('ai', `<p>Connection error. Please check your internet and try again.</p>`);
+    const isNetworkErr = err.message.includes('Failed to fetch') || err.message.includes('NetworkError') || err.message.includes('net::');
+    const friendlyMsg = isNetworkErr
+      ? '🔌 Could not reach the server. Possible causes:<br><br>' +
+        '• No internet connection<br>' +
+        '• If using Render backend: your server may be sleeping (wait 30 sec and retry)<br>' +
+        '• If opening HTML directly from your computer: browsers block direct API calls for security — you must host the file on a web server or enter an API key'
+      : `⚠️ ${err.message}`;
+
+    appendMessage('ai', `<div style="font-size:13px;line-height:1.8;">${friendlyMsg}<br><br>
+      <span onclick="retryLast()" style="cursor:pointer;color:var(--gold);text-decoration:underline;">🔄 Click to retry</span>
+      &nbsp;&nbsp;
+      <span onclick="showApiKeyScreen()" style="cursor:pointer;color:var(--saffron-light);text-decoration:underline;">🔑 Enter API key</span>
+    </div>`);
   }
+
   isLoading = false;
   document.getElementById('sendBtn').disabled = false;
+}
+
+function retryLast() {
+  // Re-send the last user message
+  if (messages.length > 0) {
+    const last = messages[messages.length - 1];
+    if (last.role === 'user') {
+      messages.pop(); // remove it so it's re-added cleanly
+      document.getElementById('userInput').value = last.content;
+      sendMessage();
+    }
+  }
 }
 
 function askTopic(t) { document.getElementById('userInput').value = `Give me a clear overview of ${t} in India — key laws, important sections, rights, and remedies.`; autoResize(document.getElementById('userInput')); sendMessage(); }
